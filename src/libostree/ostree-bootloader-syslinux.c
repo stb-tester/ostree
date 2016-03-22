@@ -65,6 +65,7 @@ static gboolean
 append_config_from_loader_entries (OstreeBootloaderSyslinux  *self,
                                    gboolean               regenerate_default,
                                    int                    bootversion,
+                                   gboolean               have_boot_partition,
                                    GPtrArray             *new_lines,
                                    GCancellable          *cancellable,
                                    GError               **error)
@@ -78,6 +79,8 @@ append_config_from_loader_entries (OstreeBootloaderSyslinux  *self,
     {
       OstreeBootconfigParser *config = loader_configs->pdata[i];
       const char *val = ostree_bootconfig_parser_get (config, "title");
+      const char *filename_prefix = have_boot_partition ? "" : "/boot";
+
       if (!val)
         val = "(Untitled)";
 
@@ -89,11 +92,11 @@ append_config_from_loader_entries (OstreeBootloaderSyslinux  *self,
       val = ostree_bootconfig_parser_get (config, "linux");
       if (!val)
         return glnx_throw (error, "No \"linux\" key in bootloader config");
-      g_ptr_array_add (new_lines, g_strdup_printf ("\tKERNEL %s", val));
+      g_ptr_array_add (new_lines, g_strdup_printf ("\tKERNEL %s%s", filename_prefix, val));
 
       val = ostree_bootconfig_parser_get (config, "initrd");
       if (val)
-        g_ptr_array_add (new_lines, g_strdup_printf ("\tINITRD %s", val));
+        g_ptr_array_add (new_lines, g_strdup_printf ("\tINITRD %s%s", filename_prefix, val));
 
       val = ostree_bootconfig_parser_get (config, "devicetree");
       if (val)
@@ -110,6 +113,7 @@ append_config_from_loader_entries (OstreeBootloaderSyslinux  *self,
 static gboolean
 _ostree_bootloader_syslinux_write_config (OstreeBootloader          *bootloader,
                                           int                    bootversion,
+                                          gboolean               have_boot_partition,
                                           GCancellable          *cancellable,
                                           GError               **error)
 {
@@ -141,6 +145,7 @@ _ostree_bootloader_syslinux_write_config (OstreeBootloader          *bootloader,
     {
       const char *line = *iter;
       gboolean skip = FALSE;
+      const char *nonostree_prefix = have_boot_partition ? "/ostree/" : "/boot/ostree/";
 
       if (parsing_label &&
           (line == NULL || !g_str_has_prefix (line, "\t")))
@@ -152,7 +157,7 @@ _ostree_bootloader_syslinux_write_config (OstreeBootloader          *bootloader,
           /* If this is a non-ostree kernel, just emit the lines
            * we saw.
            */
-          if (!g_str_has_prefix (kernel_arg, "/ostree/"))
+          if (!g_str_has_prefix (kernel_arg, nonostree_prefix))
             {
               for (guint i = 0; i < tmp_lines->len; i++)
                 {
@@ -209,7 +214,8 @@ _ostree_bootloader_syslinux_write_config (OstreeBootloader          *bootloader,
     regenerate_default = TRUE;
 
   if (!append_config_from_loader_entries (self, regenerate_default,
-                                          bootversion, new_lines,
+                                          bootversion, have_boot_partition,
+                                          new_lines,
                                           cancellable, error))
     return FALSE;
 
