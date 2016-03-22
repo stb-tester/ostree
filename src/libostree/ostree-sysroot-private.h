@@ -34,6 +34,8 @@ typedef enum {
   OSTREE_SYSROOT_DEBUG_NO_XATTRS = 1 << 1,
   /* https://github.com/ostreedev/ostree/pull/1049 */
   OSTREE_SYSROOT_DEBUG_TEST_FIFREEZE = 1 << 2,
+  /* If set, assume /boot is on / */
+  OSTREE_SYSROOT_DEBUG_BOOT_IS_NOT_MOUNT = 1 << 3
 } OstreeSysrootDebugFlags;
 
 /**
