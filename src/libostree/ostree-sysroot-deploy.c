@@ -88,7 +88,7 @@ symlink_at_replace (const char    *oldpath,
 }
 
 /* Try a hardlink if we can, otherwise fall back to copying.  Used
- * right now for kernels/initramfs in /boot, where we can just
+ * right now for kernels/initramfs/device trees in /boot, where we can just
  * hardlink if we're on the same partition.
  */
 static gboolean
@@ -958,6 +958,7 @@ get_kernel_from_tree (int             deployment_dfd,
                       int            *out_boot_dfd,
                       char          **out_kernel_name,
                       char          **out_initramfs_name,
+                      char          **out_devicetree_name,
                       GCancellable   *cancellable,
                       GError        **error)
 {
@@ -966,8 +967,10 @@ get_kernel_from_tree (int             deployment_dfd,
   g_auto(GLnxDirFdIterator) dfditer = { 0, };
   g_autofree char *ret_kernel_name = NULL;
   g_autofree char *ret_initramfs_name = NULL;
+  g_autofree char *ret_devicetree_name = NULL;
   g_autofree char *kernel_checksum = NULL;
   g_autofree char *initramfs_checksum = NULL;
+  g_autofree char *devicetree_checksum = NULL;
 
   ret_boot_dfd = glnx_opendirat_with_errno (deployment_dfd, "usr/lib/ostree-boot", TRUE);
   if (ret_boot_dfd == -1)
@@ -1017,8 +1020,19 @@ get_kernel_from_tree (int             deployment_dfd,
               ret_initramfs_name = g_strdup (dent->d_name);
             }
         }
+      else if (ret_devicetree_name == NULL && g_str_has_prefix (dent->d_name, "devicetree-"))
+        {
+          const char *dash = strrchr (dent->d_name, '-');
+          g_assert (dash);
+          if (ostree_validate_structureof_checksum_string (dash + 1, NULL))
+            {
+              devicetree_checksum = g_strdup (dash + 1);
+              ret_devicetree_name = g_strdup (dent->d_name);
+            }
+        }
       
-      if (ret_kernel_name != NULL && ret_initramfs_name != NULL)
+      if (ret_kernel_name != NULL && ret_initramfs_name != NULL &&
+          ret_devicetree_name != NULL)
         break;
     }
 
@@ -1039,10 +1053,21 @@ get_kernel_from_tree (int             deployment_dfd,
         }
     }
 
+  if (ret_devicetree_name != NULL)
+    {
+      if (strcmp (kernel_checksum, devicetree_checksum) != 0)
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+                       "Mismatched kernel checksum vs device tree in tree");
+          goto out;
+        }
+    }
+
   *out_boot_dfd = ret_boot_dfd;
   ret_boot_dfd = -1;
   *out_kernel_name = g_steal_pointer (&ret_kernel_name);
   *out_initramfs_name = g_steal_pointer (&ret_initramfs_name);
+  *out_devicetree_name = g_steal_pointer (&ret_devicetree_name);
   ret = TRUE;
  out:
   return ret;
@@ -1057,7 +1082,8 @@ checksum_from_kernel_src (const char   *name,
   if (!last_dash)
     {
       g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Malformed kernel/initramfs name '%s', missing '-'", name);
+                   "Malformed kernel/initramfs/device tree name '%s', missing "
+                   "'-'", name);
       return FALSE;
     }
   *out_checksum = g_strdup (last_dash + 1);
@@ -1296,8 +1322,10 @@ install_deployment_kernel (OstreeSysroot   *sysroot,
   g_autofree char *bootconf_name = NULL;
   g_autofree char *dest_kernel_name = NULL;
   g_autofree char *dest_initramfs_name = NULL;
+  g_autofree char *dest_devicetree_name = NULL;
   g_autofree char *tree_kernel_name = NULL;
   g_autofree char *tree_initramfs_name = NULL;
+  g_autofree char *tree_devicetree_name = NULL;
   g_autofree char *deployment_dirpath = NULL;
   glnx_fd_close int deployment_dfd = -1;
   glnx_fd_close int tree_boot_dfd = -1;
@@ -1323,7 +1351,7 @@ install_deployment_kernel (OstreeSysroot   *sysroot,
 
   if (!get_kernel_from_tree (deployment_dfd, &tree_boot_dfd,
                              &tree_kernel_name, &tree_initramfs_name,
-                             cancellable, error))
+                             &tree_devicetree_name, cancellable, error))
     goto out;
 
   if (!glnx_opendirat (sysroot->sysroot_fd, "boot", TRUE, &boot_dfd, error))
@@ -1370,6 +1398,24 @@ install_deployment_kernel (OstreeSysroot   *sysroot,
             }
           if (!hardlink_or_copy_at (tree_boot_dfd, tree_initramfs_name,
                                     bootcsum_dfd, dest_initramfs_name,
+                                    cancellable, error))
+            goto out;
+        }
+    }
+
+  if (tree_devicetree_name)
+    {
+      dest_devicetree_name = remove_checksum_from_kernel_name (tree_devicetree_name, bootcsum);
+
+      if (fstatat (bootcsum_dfd, dest_devicetree_name, &stbuf, 0) != 0)
+        {
+          if (errno != ENOENT)
+            {
+              glnx_set_prefix_error_from_errno (error, "fstat %s", dest_devicetree_name);
+              goto out;
+            }
+          if (!hardlink_or_copy_at (tree_boot_dfd, tree_devicetree_name,
+                                    bootcsum_dfd, dest_devicetree_name,
                                     cancellable, error))
             goto out;
         }
@@ -1481,6 +1527,12 @@ install_deployment_kernel (OstreeSysroot   *sysroot,
                                              new_bootversion, osname, bootcsum,
                                              ostree_deployment_get_bootserial (deployment));
       _ostree_kernel_args_replace_take (kargs, g_steal_pointer (&prepare_root_arg));
+    }
+
+  if (dest_devicetree_name)
+    {
+      g_autofree char * boot_relpath = g_strconcat ("/", bootcsumdir, "/", dest_devicetree_name, NULL);
+      ostree_bootconfig_parser_set (bootconfig, "devicetree", boot_relpath);
     }
 
   ostree_kernel_arg = g_strdup_printf ("ostree=/ostree/boot.%d/%s/%s/%d",
@@ -2065,6 +2117,7 @@ ostree_sysroot_deploy_tree (OstreeSysroot     *self,
   glnx_fd_close int tree_boot_dfd = -1;
   g_autofree char *tree_kernel_path = NULL;
   g_autofree char *tree_initramfs_path = NULL;
+  g_autofree char *tree_devicetree_path = NULL;
   glnx_fd_close int deployment_dfd = -1;
   glnx_unref_object OstreeSePolicy *sepolicy = NULL;
   g_autofree char *new_bootcsum = NULL;
@@ -2109,7 +2162,7 @@ ostree_sysroot_deploy_tree (OstreeSysroot     *self,
 
   if (!get_kernel_from_tree (deployment_dfd, &tree_boot_dfd,
                              &tree_kernel_path, &tree_initramfs_path,
-                             cancellable, error))
+                             &tree_devicetree_path, cancellable, error))
     goto out;
   
   if (tree_initramfs_path != NULL)
