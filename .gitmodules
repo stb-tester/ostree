@@ -1,6 +1,6 @@
 [submodule "libglnx"]
 	path = libglnx
-	url = https://git.gnome.org/browse/libglnx
+	url = https://github.com/stb-tester/libglnx
 [submodule "bsdiff"]
 	path = bsdiff
-	url = https://github.com/mendsley/bsdiff
+	url = https://github.com/stb-tester/bsdiff
