@@ -1160,7 +1160,7 @@ get_kernel_from_tree_legacy_layouts (int                  deployment_dfd,
         {
           g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
                        "Mismatched kernel checksum vs device tree in tree");
-          goto out;
+          return FALSE;
         }
     }
 
