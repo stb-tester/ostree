@@ -140,7 +140,7 @@ create_config_from_boot_loader_entries (OstreeBootloaderUboot     *self,
 
       val = ostree_bootconfig_parser_get (config, "initrd");
       if (val)
-        g_ptr_array_add (new_lines, g_strdup_printf ("ramdisk_image%s=%s", index_suffix, filename_prefix, val));
+        g_ptr_array_add (new_lines, g_strdup_printf ("ramdisk_image%s=%s%s", index_suffix, filename_prefix, val));
 
       val = ostree_bootconfig_parser_get (config, "options");
       if (val)
