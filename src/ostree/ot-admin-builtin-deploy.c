@@ -84,7 +84,7 @@ ot_admin_builtin_deploy (int argc, char **argv, OstreeCommandInvocation *invocat
   if (opt_kernel_proc_cmdline && opt_kernel_arg_none)
   {
     ot_util_usage_error (context, "Can't specify both --karg-proc-cmdline and --karg-none", error);
-    goto out;
+    return FALSE;
   }
 
   const char *refspec = argv[1];
