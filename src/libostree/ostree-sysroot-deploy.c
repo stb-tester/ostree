@@ -1029,6 +1029,22 @@ get_kernel_from_tree_usrlib_modules (int                  deployment_dfd,
       if (!ot_gio_splice_update_checksum (NULL, in, &checksum, cancellable, error))
         return FALSE;
     }
+  g_clear_object (&in);
+  glnx_close_fd (&fd);
+
+  if (!ot_openat_ignore_enoent (ret_layout->boot_dfd, "devicetree", &fd, error))
+    return FALSE;
+  if (fd != -1)
+    {
+      ret_layout->devicetree_srcpath = g_strdup ("devicetree");
+      ret_layout->devicetree_namever = g_strdup_printf ("devicetree-%s", kver);
+      in = g_unix_input_stream_new (fd, FALSE);
+      if (!ot_gio_splice_update_checksum (NULL, in, &checksum, cancellable, error))
+        return FALSE;
+    }
+
+  g_clear_object (&in);
+  glnx_close_fd (&fd);
 
   char hexdigest[OSTREE_SHA256_STRING_LEN+1];
   ot_checksum_get_hexdigest (&checksum, hexdigest, sizeof (hexdigest));
