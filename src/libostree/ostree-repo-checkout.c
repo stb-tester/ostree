@@ -784,8 +784,6 @@ dir_iter_clear(DirDirectoryIter *self) {
   CLEAR(self);
 }
 
-G_DEFINE_AUTO_CLEANUP_CLEAR_FUNC(DirDirectoryIter, dir_iter_clear);
-
 static DirDentry*
 dir_iter_next(DirDirectoryIter* self)
 {
@@ -860,6 +858,85 @@ file_iter_next(FileDirectoryIter* self)
 }
 
 /*
+ * Diff a list dirtrees:
+ */
+
+typedef struct {
+  const char *name;
+  DirDentry *before;
+  DirDentry *after;
+} DirDiffItem;
+
+typedef struct {
+  DirDirectoryIter before_iter;
+  DirDirectoryIter after_iter;
+  int last_cmp;
+  DirDiffItem item;
+} DirDiffIter;
+
+static DirDiffIter
+dir_diff_iter_init(GVariant *before_dirtree, GVariant *after_dirtree) {
+  DirDiffIter self;
+  CLEAR(&self);
+  self.before_iter = dir_iter_init(before_dirtree);
+  self.after_iter = dir_iter_init(after_dirtree);
+  return self;
+}
+
+static void
+dir_diff_iter_clear(DirDiffIter *self) {
+  dir_iter_clear (&self->before_iter);
+  dir_iter_clear (&self->after_iter);
+  self->last_cmp = 0;
+  CLEAR(&self->item);
+}
+
+G_DEFINE_AUTO_CLEANUP_CLEAR_FUNC(DirDiffIter, dir_diff_iter_clear);
+
+static int
+dir_entry_cmp_by_name(DirDentry* before, DirDentry* after)
+{
+  /* NULL comes after all items as it's the list terminator */
+  if ((!before || !before->name) && (!after || !after->name))
+    return -2;
+  else if (!after || !after->name)
+    return -1;
+  else if (!before || !before->name)
+    return 1;
+  else
+    return MAX(-1, MIN(1, strcmp (before->name, after->name)));
+}
+
+static DirDiffItem*
+dir_diff_iter_next(DirDiffIter* self)
+{
+  if (self->last_cmp == 0 || self->last_cmp == -1)
+    dir_iter_next(&self->before_iter);
+  if (self->last_cmp == 0 || self->last_cmp == 1)
+    dir_iter_next(&self->after_iter);
+
+  self->last_cmp = dir_entry_cmp_by_name(&self->before_iter.entry,
+                                         &self->after_iter.entry);
+  if (self->last_cmp == -2)
+    return NULL;
+  if (self->last_cmp == 0 || self->last_cmp == -1)
+    {
+      self->item.name = self->before_iter.entry.name;
+      self->item.before = &self->before_iter.entry;
+    }
+  else
+    self->item.before = NULL;
+  if (self->last_cmp == 0 || self->last_cmp == 1)
+    {
+      self->item.name = self->after_iter.entry.name;
+      self->item.after = &self->after_iter.entry;
+    }
+  else
+    self->item.after = NULL;
+  return &self->item;
+}
+
+/*
  * checkout_tree_at_recurse:
  * @self: Repo
  * @options: Options controlling all files
@@ -869,6 +946,7 @@ file_iter_next(FileDirectoryIter* self)
  * @destination_name: Use this name for tree
  * @dirtree_checksum: dirtree checksum of the tree being checked out
  * @dirmeta_checksum: dirmeta checksum of the tree being checked out
+ * @orig_dirtree_checksum:
  * @cancellable: Cancellable
  * @error: Error
  *
@@ -883,6 +961,7 @@ checkout_tree_at_recurse (OstreeRepo                        *self,
                           const char                        *destination_name,
                           const char                        *dirtree_checksum,
                           const char                        *dirmeta_checksum,
+                          const char                        *orig_dirtree_checksum,
                           GCancellable                      *cancellable,
                           GError                           **error)
 {
@@ -890,6 +969,7 @@ checkout_tree_at_recurse (OstreeRepo                        *self,
   const gboolean sepolicy_enabled = options->sepolicy && !self->disable_xattrs;
   g_autoptr(GVariant) dirtree = NULL;
   g_autoptr(GVariant) dirmeta = NULL;
+  g_autoptr(GVariant) orig_dirtree = NULL;
   g_autoptr(GVariant) xattrs = NULL;
   g_autoptr(GVariant) modified_xattrs = NULL;
 
@@ -899,6 +979,10 @@ checkout_tree_at_recurse (OstreeRepo                        *self,
   if (!ostree_repo_load_variant (self, OSTREE_OBJECT_TYPE_DIR_META,
                                  dirmeta_checksum, &dirmeta, error))
     return FALSE;
+  if (orig_dirtree_checksum)
+    if (!ostree_repo_load_variant (self, OSTREE_OBJECT_TYPE_DIR_TREE,
+                                   orig_dirtree_checksum, &orig_dirtree, error))
+      return FALSE;
 
   /* Parse OSTREE_OBJECT_TYPE_DIR_META */
   guint32 uid, gid, mode;
@@ -975,6 +1059,18 @@ checkout_tree_at_recurse (OstreeRepo                        *self,
     }
 
   GString *selabel_path_buf = state->selabel_path_buf;
+
+  /* Delete files and directories that will be changing type - we can't
+     atomically replace their contents */
+  {
+    g_auto(FileDiffIter) iter = file_diff_iter_init(orig_dirtree, dirtree);
+    FileDiffItem* diff;
+    while ((diff = file_diff_iter_next(&iter)))
+      if (!diff->after_checksum)
+        if (!glnx_unlinkat(destination_dfd, diff->name, 0, error))
+          return FALSE;
+  }
+
   /* Process files in this subdir */
   {
     g_auto(FileDirectoryIter) iter = file_iter_init(dirtree);
@@ -998,26 +1094,37 @@ checkout_tree_at_recurse (OstreeRepo                        *self,
 
   /* Process subdirectories */
   {
-    g_auto(DirDirectoryIter) iter = dir_iter_init(dirtree);
-    DirDentry* subdir;
-    while ((subdir = dir_iter_next(&iter)))
+    g_auto(DirDiffIter) iter = dir_diff_iter_init(orig_dirtree, dirtree);
+    DirDiffItem* diff;
+    while ((diff = dir_diff_iter_next(&iter)))
       {
-        const size_t origlen = selabel_path_buf ? selabel_path_buf->len : 0;
-        if (selabel_path_buf)
+        if (diff->before && diff->after &&
+            strcmp(diff->before->dirtree_checksum, diff->after->dirtree_checksum) == 0 &&
+            strcmp(diff->before->dirmeta_checksum, diff->after->dirmeta_checksum) == 0)
           {
-            g_string_append (selabel_path_buf, subdir->name);
-            g_string_append_c (selabel_path_buf, '/');
+            /* They're identical, leave it alone */
+            continue;
           }
+        else if (diff->after)
+          {
+            const size_t origlen = selabel_path_buf ? selabel_path_buf->len : 0;
+            if (selabel_path_buf)
+              {
+                g_string_append (selabel_path_buf, diff->name);
+                g_string_append_c (selabel_path_buf, '/');
+              }
 
-        if (!checkout_tree_at_recurse (self, options, state,
-                                       destination_dfd, subdir->name,
-                                       subdir->dirtree_checksum,
-                                       subdir->dirmeta_checksum,
-                                       cancellable, error))
-          return FALSE;
+            if (!checkout_tree_at_recurse (self, options, state,
+                                           destination_dfd, diff->name,
+                                           diff->after->dirtree_checksum,
+                                           diff->after->dirmeta_checksum,
+                                           diff->before ? diff->before->dirtree_checksum : NULL,
+                                           cancellable, error))
+              return FALSE;
 
-        if (selabel_path_buf)
-          g_string_truncate (selabel_path_buf, origlen);
+            if (selabel_path_buf)
+              g_string_truncate (selabel_path_buf, origlen);
+          }
       }
   }
 
@@ -1132,7 +1239,7 @@ checkout_tree_at (OstreeRepo                        *self,
   const char *dirmeta_checksum = ostree_repo_file_tree_get_metadata_checksum (source);
   return checkout_tree_at_recurse (self, options, &state, destination_parent_fd,
                                    destination_name,
-                                   dirtree_checksum, dirmeta_checksum,
+                                   dirtree_checksum, dirmeta_checksum, NULL,
                                    cancellable, error);
 }
 
