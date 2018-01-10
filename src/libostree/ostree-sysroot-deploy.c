@@ -2018,10 +2018,8 @@ query_mount_is_ro (const char *path,
    * introspect the actual mount at runtime.
    */
   if (statvfs (path, &stvfsbuf) < 0)
-    {
-      glnx_set_error_from_errno (error);
-      return FALSE;
-    }
+    return glnx_throw_errno_prefix (error, "statvfs");
+
   *out_is_ro = (stvfsbuf.f_flag & ST_RDONLY) != 0;
   return TRUE;
 }
