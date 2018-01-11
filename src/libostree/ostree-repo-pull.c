@@ -1628,7 +1628,8 @@ scan_commit_object (OtPullData                 *pull_data,
 #ifdef OSTREE_ENABLE_EXPERIMENTAL_API
   remote_collection_id = get_remote_repo_collection_id (pull_data);
 #endif  /* OSTREE_ENABLE_EXPERIMENTAL_API */
-  if (!_ostree_repo_verify_bindings (remote_collection_id,
+  if (pull_data->gpg_verify &&
+      !_ostree_repo_verify_bindings (remote_collection_id,
                                      (ref != NULL) ? ref->ref_name : NULL,
                                      commit, error))
     return glnx_prefix_error (error, "Commit %s", checksum);
