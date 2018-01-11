@@ -503,38 +503,33 @@ checkout_deployment_tree (OstreeSysroot     *sysroot,
                           GCancellable      *cancellable,
                           GError           **error)
 {
-  gboolean ret = FALSE;
-  OstreeRepoCheckoutAtOptions checkout_opts = { 0, };
-  const char *csum = ostree_deployment_get_csum (deployment);
-  g_autofree char *checkout_target_name = NULL;
-  g_autofree char *osdeploy_path = NULL;
-  glnx_autofd int osdeploy_dfd = -1;
-  int ret_fd;
-
-  osdeploy_path = g_strconcat ("ostree/deploy/", ostree_deployment_get_osname (deployment), "/deploy", NULL);
-  checkout_target_name = g_strdup_printf ("%s.%d", csum, ostree_deployment_get_deployserial (deployment));
-
+  g_autofree char *osdeploy_path = g_strconcat (
+      "ostree/deploy/", ostree_deployment_get_osname (deployment), "/deploy", NULL);
   if (!glnx_shutil_mkdir_p_at (sysroot->sysroot_fd, osdeploy_path, 0775, cancellable, error))
-    goto out;
+    return FALSE;
 
+  glnx_autofd int osdeploy_dfd = -1;
   if (!glnx_opendirat (sysroot->sysroot_fd, osdeploy_path, TRUE, &osdeploy_dfd, error))
-    goto out;
+    return FALSE;
 
+  const char *csum = ostree_deployment_get_csum (deployment);
+  g_autofree char *checkout_target_name = g_strdup_printf (
+      "%s.%d", csum, ostree_deployment_get_deployserial (deployment));
   if (!glnx_shutil_rm_rf_at (osdeploy_dfd, checkout_target_name, cancellable, error))
-    goto out;
+    return FALSE;
 
+  OstreeRepoCheckoutAtOptions checkout_opts = { 0, };
   if (!ostree_repo_checkout_at (repo, &checkout_opts, osdeploy_dfd,
                                 checkout_target_name, csum,
                                 cancellable, error))
-    goto out;
+    return FALSE;
 
+  glnx_autofd int ret_fd = -1;
   if (!glnx_opendirat (osdeploy_dfd, checkout_target_name, TRUE, &ret_fd, error))
-    goto out;
+    return FALSE;
 
-  ret = TRUE;
-  *out_deployment_dfd = ret_fd;
- out:
-  return ret;
+  *out_deployment_dfd = glnx_steal_fd(&ret_fd);
+  return TRUE;
 }
 
 static char *
