@@ -518,10 +518,25 @@ checkout_deployment_tree (OstreeSysroot     *sysroot,
   if (!glnx_shutil_rm_rf_at (osdeploy_dfd, checkout_target_name, cancellable, error))
     return FALSE;
 
+  g_autofree char *checkout_target_tempname = g_strdup_printf (
+      "ostree/deploy/%s/deploy-wip", osname);
+  if (!glnx_shutil_rm_rf_at (sysroot->sysroot_fd, checkout_target_tempname, cancellable, error))
+    return FALSE;
+
   OstreeRepoCheckoutAtOptions checkout_opts = { 0, };
-  if (!ostree_repo_checkout_at (repo, &checkout_opts, osdeploy_dfd,
-                                checkout_target_name, csum,
+  if (!ostree_repo_checkout_at (repo, &checkout_opts, sysroot->sysroot_fd,
+                                checkout_target_tempname, csum,
                                 cancellable, error))
+    return FALSE;
+
+  if (TEMP_FAILURE_RETRY(syncfs (osdeploy_dfd)) != 0)
+    {
+      glnx_throw_errno_prefix (error, "syncfs");
+      return FALSE;
+    }
+
+  if (!glnx_renameat (sysroot->sysroot_fd, checkout_target_tempname,
+                      osdeploy_dfd, checkout_target_name, error))
     return FALSE;
 
   glnx_autofd int ret_fd = -1;

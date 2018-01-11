@@ -279,6 +279,12 @@ cleanup_old_deployments (OstreeSysroot       *self,
       g_autofree char *deployment_path = ostree_sysroot_get_deployment_dirpath (self, deployment);
       g_autofree char *origin_relpath = ostree_deployment_get_origin_relpath (deployment);
 
+      g_autofree char *deploy_wip = g_strdup_printf (
+          "ostree/deploy/%s/deploy-wip",
+          ostree_deployment_get_osname (deployment));
+      if (!glnx_shutil_rm_rf_at (self->sysroot_fd, deploy_wip, cancellable, error))
+        return FALSE;
+
       if (!g_hash_table_lookup (active_deployment_dirs, deployment_path))
         {
           struct stat stbuf;
