@@ -35,6 +35,7 @@ static gboolean opt_retain;
 static gboolean opt_retain_pending;
 static gboolean opt_retain_rollback;
 static gboolean opt_not_as_default;
+static gboolean opt_clean = TRUE;
 static char **opt_kernel_argv;
 static char **opt_kernel_argv_append;
 static gboolean opt_kernel_proc_cmdline;
@@ -49,6 +50,7 @@ static char *opt_origin_path;
 static GOptionEntry options[] = {
   { "os", 0, 0, G_OPTION_ARG_STRING, &opt_osname, "Use a different operating system root than the current one", "OSNAME" },
   { "origin-file", 0, 0, G_OPTION_ARG_FILENAME, &opt_origin_path, "Specify origin file", "FILENAME" },
+  { "no-clean", 0, G_OPTION_FLAG_REVERSE, G_OPTION_ARG_NONE, &opt_clean, "Don't clean the repo when done", NULL},
   { "retain", 0, 0, G_OPTION_ARG_NONE, &opt_retain, "Do not delete previous deployments", NULL },
   { "retain-pending", 0, 0, G_OPTION_ARG_NONE, &opt_retain_pending, "Do not delete pending deployments", NULL },
   { "retain-rollback", 0, 0, G_OPTION_ARG_NONE, &opt_retain_rollback, "Do not delete rollback deployments", NULL },
@@ -167,6 +169,9 @@ ot_admin_builtin_deploy (int argc, char **argv, OstreeCommandInvocation *invocat
 
   if (opt_not_as_default)
     flags |= OSTREE_SYSROOT_SIMPLE_WRITE_DEPLOYMENT_FLAGS_NOT_DEFAULT;
+
+  if (!opt_clean)
+    flags |= OSTREE_SYSROOT_SIMPLE_WRITE_DEPLOYMENT_FLAGS_NO_CLEAN;
 
   if (!ostree_sysroot_simple_write_deployment (sysroot, opt_osname, new_deployment,
                                                merge_deployment, flags, cancellable, error))
