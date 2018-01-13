@@ -212,7 +212,11 @@ deploy_cache_try_ingest(OstreeSysroot       *self,
   if (!deploy_cache_get_tree (self, osname, &old_csum, &exists, cancellable, error))
     return FALSE;
   if (exists)
-    return TRUE;
+    {
+      /* Only want to cache one tree at a time */
+      g_printerr ("Deploy cache already full.  Contains %s\n", old_csum);
+      return TRUE;
+    }
 
   g_autofree char *cachepath = g_strdup_printf (
       "ostree/deploy/%s/cache", osname);
@@ -228,6 +232,10 @@ deploy_cache_try_ingest(OstreeSysroot       *self,
                       injested_path,
                       error))
     return FALSE;
+
+  g_printerr("Saving old deployment root to accelerate future deploys: mv %s %s\n",
+             ostree_sysroot_get_deployment_dirpath(self, deployment),
+             injested_path);
 
   g_autoptr(OstreeRepo) repo = NULL;
   if (!ostree_sysroot_get_repo (self, &repo, cancellable, error))
@@ -613,7 +621,10 @@ _ostree_sysroot_cleanup_internal (OstreeSysroot              *self,
     return glnx_prefix_error (error, "Cleaning bootversions");
 
   if (!cleanup_old_deployments (self, cancellable, error))
-    return glnx_prefix_error (error, "Cleaning deployments");
+    {
+      g_printerr ("cleanup_old_deployments failed: %s\n", (*error)->message);
+      return glnx_prefix_error (error, "Cleaning deployments");
+    }
 
   OstreeRepo *repo = ostree_sysroot_repo (self);
   if (!generate_deployment_refs (self, repo,

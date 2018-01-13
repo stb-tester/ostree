@@ -566,8 +566,10 @@ checkout_deployment_tree (OstreeSysroot     *sysroot,
                                  &olddeploy_err))
     {
       if (olddeploy_err)
-        g_printerr("Reusing old deployment failed: %s.  Falling back to "
+        g_printerr("Deploy cache: Reusing old deployment failed: %s.  Falling back to "
                    "fresh deploy\n", olddeploy_err->message);
+      else
+        g_printerr("Deploy cache: No old deployment to reuse.  Falling back to fresh deploy\n");
 
       if (!glnx_shutil_rm_rf_at (sysroot->sysroot_fd, checkout_target_tempname,
                                  cancellable, error))
@@ -580,6 +582,8 @@ checkout_deployment_tree (OstreeSysroot     *sysroot,
                                     cancellable, error))
         return FALSE;
     }
+  else
+    g_printerr("Deploy cache: Reused and updated old deployment\n");
 
   if (!glnx_renameat (sysroot->sysroot_fd, checkout_target_tempname,
                       osdeploy_dfd, checkout_target_name, error))
