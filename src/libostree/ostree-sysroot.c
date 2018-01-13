@@ -1598,6 +1598,8 @@ ostree_sysroot_simple_write_deployment (OstreeSysroot      *sysroot,
     }
 
   OstreeSysrootWriteDeploymentsOpts write_opts = { .do_postclean = postclean };
+  if (flags & OSTREE_SYSROOT_SIMPLE_WRITE_DEPLOYMENT_FLAGS_NO_PRUNE)
+    write_opts.postclean_no_prune = TRUE;
   if (!ostree_sysroot_write_deployments_with_options (sysroot, new_deployments, &write_opts,
                                                       cancellable, error))
     return FALSE;

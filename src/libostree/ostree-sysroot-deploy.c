@@ -2282,11 +2282,20 @@ ostree_sysroot_write_deployments_with_options (OstreeSysroot     *self,
    */
   if (opts->do_postclean)
     {
-      if (!ostree_sysroot_cleanup (self, cancellable, error))
+      if (opts->postclean_no_prune)
         {
-          g_prefix_error (error, "Performing final cleanup: ");
-          goto out;
+          if (!ostree_sysroot_prepare_cleanup (self, cancellable, error))
+            {
+              g_prefix_error (error, "Performing final cleanup: ");
+              goto out;
+            }
         }
+      else
+        if (!ostree_sysroot_cleanup (self, cancellable, error))
+          {
+            g_prefix_error (error, "Performing final cleanup: ");
+            goto out;
+          }
     }
 
   ret = TRUE;
