@@ -106,7 +106,7 @@ append_system_uenv (OstreeBootloaderUboot   *self,
 static gboolean
 create_config_from_boot_loader_entries (OstreeBootloaderUboot     *self,
                                         int                        bootversion,
-                                        gboolean                   have_boot_partition,
+                                        const char                *boot_path_on_disk,
                                         GPtrArray                 *new_lines,
                                         GCancellable              *cancellable,
                                         GError                   **error)
@@ -114,7 +114,6 @@ create_config_from_boot_loader_entries (OstreeBootloaderUboot     *self,
   g_autoptr(GPtrArray) boot_loader_configs = NULL;
   OstreeBootconfigParser *config;
   const char *val;
-  const char *filename_prefix = have_boot_partition ? "" : "/boot";
 
   if (!_ostree_sysroot_read_boot_loader_configs (self->sysroot, bootversion, &boot_loader_configs,
                                                  cancellable, error))
@@ -136,11 +135,11 @@ create_config_from_boot_loader_entries (OstreeBootloaderUboot     *self,
                        "No \"linux\" key in bootloader config");
           return FALSE;
         }
-      g_ptr_array_add (new_lines, g_strdup_printf ("kernel_image%s=%s%s", index_suffix, filename_prefix, val));
+      g_ptr_array_add (new_lines, g_strdup_printf ("kernel_image%s=%s%s", index_suffix, boot_path_on_disk, val));
 
       val = ostree_bootconfig_parser_get (config, "initrd");
       if (val)
-        g_ptr_array_add (new_lines, g_strdup_printf ("ramdisk_image%s=%s%s", index_suffix, filename_prefix, val));
+        g_ptr_array_add (new_lines, g_strdup_printf ("ramdisk_image%s=%s%s", index_suffix, boot_path_on_disk, val));
 
       val = ostree_bootconfig_parser_get (config, "options");
       if (val)
@@ -158,7 +157,7 @@ create_config_from_boot_loader_entries (OstreeBootloaderUboot     *self,
 static gboolean
 _ostree_bootloader_uboot_write_config (OstreeBootloader          *bootloader,
                                        int                        bootversion,
-                                       gboolean                   have_boot_partition,
+                                       const char                *boot_path_on_disk,
                                        GCancellable              *cancellable,
                                        GError                   **error)
 {
@@ -172,7 +171,7 @@ _ostree_bootloader_uboot_write_config (OstreeBootloader          *bootloader,
     return FALSE;
 
   g_autoptr(GPtrArray) new_lines = g_ptr_array_new_with_free_func (g_free);
-  if (!create_config_from_boot_loader_entries (self, bootversion, have_boot_partition, new_lines,
+  if (!create_config_from_boot_loader_entries (self, bootversion, boot_path_on_disk, new_lines,
                                                cancellable, error))
     return FALSE;
 

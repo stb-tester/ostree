@@ -1970,7 +1970,7 @@ cleanup_legacy_current_symlinks (OstreeSysroot         *self,
  * /sysroot.
  */
 static gboolean
-is_mount (const char *path)
+is_ro_mount (const char *path)
 {
 #ifdef HAVE_LIBMOUNT
   /* Dragging in all of this crud is apparently necessary just to determine
@@ -1983,6 +1983,7 @@ is_mount (const char *path)
   struct libmnt_fs *fs;
   struct libmnt_cache *cache;
   gboolean is_mount = FALSE;
+  struct statvfs stvfsbuf;
 
   if (!tb)
     return FALSE;
@@ -2001,27 +2002,17 @@ is_mount (const char *path)
   mnt_free_cache (cache);
 #endif
 
-  return is_mount;
-#else
-  return FALSE;
-#endif
-}
-
-static gboolean
-query_mount_is_ro (const char *path,
-                   gboolean *out_is_ro,
-                   GError **error)
-{
-  struct statvfs stvfsbuf;
+  if (!is_mount)
+    return FALSE;
 
   /* We *could* parse the options, but it seems more reliable to
    * introspect the actual mount at runtime.
    */
-  if (statvfs (path, &stvfsbuf) < 0)
-    return glnx_throw_errno_prefix (error, "statvfs");
+  if (statvfs (path, &stvfsbuf) == 0)
+    return (stvfsbuf.f_flag & ST_RDONLY) != 0;
 
-  *out_is_ro = (stvfsbuf.f_flag & ST_RDONLY) != 0;
-  return TRUE;
+#endif
+  return FALSE;
 }
 
 /**
@@ -2043,6 +2034,53 @@ ostree_sysroot_write_deployments (OstreeSysroot     *self,
   OstreeSysrootWriteDeploymentsOpts opts = { .do_postclean = TRUE };
   return ostree_sysroot_write_deployments_with_options (self, new_deployments, &opts,
                                                         cancellable, error);
+}
+
+#ifdef HAVE_LIBMOUNT
+typedef struct libmnt_table libmnt_table;
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (libmnt_table, mnt_free_table);
+typedef struct libmnt_fs libmnt_fs;
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (libmnt_fs, mnt_unref_fs);
+#endif /* HAVE_LIBMOUNT */
+
+/* Finds the path to /boot on the filesystem that /boot is actually stored on.
+ * If you have a dedicated boot partition this will probably be "".  If it's
+ * stored on the root partition it will be "/boot".
+ *
+ * The path_out won't end with a "/".  That means that "/" is represented at ""
+ */
+static gboolean
+boot_find_path_on_disk(char** path_out, GError **error)
+{
+#ifdef HAVE_LIBMOUNT
+  g_autoptr(libmnt_table) tb = mnt_new_table();
+  g_assert (tb);
+  if (mnt_table_parse_mtab(tb, getenv("OSTREE_DEBUG_MOUNTINFO_FILE")) < 0)
+    return glnx_throw (error, "Failed to parse /proc/self/mountinfo");
+
+  const char *suffix = NULL;
+  struct libmnt_fs *fs = mnt_table_find_target(tb, "/boot", MNT_ITER_BACKWARD);
+  if (fs)
+    suffix = "";
+  else
+    {
+      suffix = "boot";
+      fs = mnt_table_find_target(tb, "/", MNT_ITER_BACKWARD);
+      if (!fs)
+        return glnx_throw (error, "libmount error: Can't find /");
+    }
+  g_autofree char *path = g_build_path ("/", mnt_fs_get_root (fs), suffix, NULL);
+  if (strcmp(path, "/") == 0)
+    {
+      g_free (g_steal_pointer(&path));
+      path = g_strdup("");
+    }
+
+  *path_out = g_steal_pointer(&path);
+  return TRUE;
+#else /* !HAVE_LIBMOUNT */
+  return g_strdup("");
+#endif /* HAVE_LIBMOUNT */
 }
 
 /**
@@ -2160,29 +2198,11 @@ ostree_sysroot_write_deployments_with_options (OstreeSysroot     *self,
       g_autofree char* new_loader_entries_dir = NULL;
       g_autoptr(OstreeRepo) repo = NULL;
       gboolean show_osname = FALSE;
-      gboolean boot_is_mount = FALSE;
 
       if (self->booted_deployment)
-        boot_is_mount = is_mount ("/boot");
-      else
-        {
-          /* For legacy reasons; see
-           * https://bugzilla.gnome.org/show_bug.cgi?id=751666 But the
-           * test suite can override this.  Do NOT use this debug flag
-           * in production, instead we could consider a compile-time
-           * default if you don't want a dependency on libmount or
-           * something.
-           */
-          boot_is_mount = (self->debug_flags & OSTREE_SYSROOT_DEBUG_BOOT_IS_NOT_MOUNT) == 0;
-        }
+        boot_was_ro_mount = is_ro_mount ("/boot");
 
-      if (self->booted_deployment && boot_is_mount)
-        {
-          if (!query_mount_is_ro ("/boot", &boot_was_ro_mount, error))
-            goto out;
-        }
-
-      g_debug ("boot is mount: %d ro: %d", boot_is_mount, boot_was_ro_mount);
+      g_debug ("boot is ro: %s", boot_was_ro_mount ? "yes" : "no");
 
       if (boot_was_ro_mount)
         {
@@ -2260,8 +2280,11 @@ ostree_sysroot_write_deployments_with_options (OstreeSysroot     *self,
 
       if (bootloader)
         {
+          g_autofree char *boot_path_on_disk = NULL;
+          if (!boot_find_path_on_disk (&boot_path_on_disk, error))
+            goto out;
           if (!_ostree_bootloader_write_config (bootloader, new_bootversion,
-                                                boot_is_mount,
+                                                boot_path_on_disk,
                                                 cancellable, error))
             {
               g_prefix_error (error, "Bootloader write config: ");

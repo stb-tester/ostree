@@ -65,7 +65,7 @@ static gboolean
 append_config_from_loader_entries (OstreeBootloaderSyslinux  *self,
                                    gboolean               regenerate_default,
                                    int                    bootversion,
-                                   gboolean               have_boot_partition,
+                                   const char            *boot_path_on_disk,
                                    GPtrArray             *new_lines,
                                    GCancellable          *cancellable,
                                    GError               **error)
@@ -79,8 +79,6 @@ append_config_from_loader_entries (OstreeBootloaderSyslinux  *self,
     {
       OstreeBootconfigParser *config = loader_configs->pdata[i];
       const char *val = ostree_bootconfig_parser_get (config, "title");
-      const char *filename_prefix = have_boot_partition ? "" : "/boot";
-
       if (!val)
         val = "(Untitled)";
 
@@ -92,15 +90,15 @@ append_config_from_loader_entries (OstreeBootloaderSyslinux  *self,
       val = ostree_bootconfig_parser_get (config, "linux");
       if (!val)
         return glnx_throw (error, "No \"linux\" key in bootloader config");
-      g_ptr_array_add (new_lines, g_strdup_printf ("\tKERNEL %s%s", filename_prefix, val));
+      g_ptr_array_add (new_lines, g_strdup_printf ("\tKERNEL %s%s", boot_path_on_disk, val));
 
       val = ostree_bootconfig_parser_get (config, "initrd");
       if (val)
-        g_ptr_array_add (new_lines, g_strdup_printf ("\tINITRD %s%s", filename_prefix, val));
+        g_ptr_array_add (new_lines, g_strdup_printf ("\tINITRD %s%s", boot_path_on_disk, val));
 
       val = ostree_bootconfig_parser_get (config, "devicetree");
       if (val)
-        g_ptr_array_add (new_lines, g_strdup_printf ("\tDEVICETREE %s", val));
+        g_ptr_array_add (new_lines, g_strdup_printf ("\tDEVICETREE %s%s", boot_path_on_disk, val));
 
       val = ostree_bootconfig_parser_get (config, "options");
       if (val)
@@ -113,7 +111,7 @@ append_config_from_loader_entries (OstreeBootloaderSyslinux  *self,
 static gboolean
 _ostree_bootloader_syslinux_write_config (OstreeBootloader          *bootloader,
                                           int                    bootversion,
-                                          gboolean               have_boot_partition,
+                                          const char            *boot_path_on_disk,
                                           GCancellable          *cancellable,
                                           GError               **error)
 {
@@ -145,7 +143,7 @@ _ostree_bootloader_syslinux_write_config (OstreeBootloader          *bootloader,
     {
       const char *line = *iter;
       gboolean skip = FALSE;
-      const char *nonostree_prefix = have_boot_partition ? "/ostree/" : "/boot/ostree/";
+      g_autofree char *nonostree_prefix = g_build_path ("/", boot_path_on_disk, "/ostree/", NULL);
 
       if (parsing_label &&
           (line == NULL || !g_str_has_prefix (line, "\t")))
@@ -214,7 +212,7 @@ _ostree_bootloader_syslinux_write_config (OstreeBootloader          *bootloader,
     regenerate_default = TRUE;
 
   if (!append_config_from_loader_entries (self, regenerate_default,
-                                          bootversion, have_boot_partition,
+                                          bootversion, boot_path_on_disk,
                                           new_lines,
                                           cancellable, error))
     return FALSE;

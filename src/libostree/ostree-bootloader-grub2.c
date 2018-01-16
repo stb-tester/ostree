@@ -320,7 +320,7 @@ grub2_child_setup (gpointer user_data)
 static gboolean
 _ostree_bootloader_grub2_write_config (OstreeBootloader      *bootloader,
                                        int                    bootversion,
-                                       gboolean               have_boot_partition,
+                                       const char            *boot_path_on_disk,
                                        GCancellable          *cancellable,
                                        GError               **error)
 {

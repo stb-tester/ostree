@@ -54,14 +54,14 @@ _ostree_bootloader_get_name (OstreeBootloader  *self)
 gboolean
 _ostree_bootloader_write_config (OstreeBootloader  *self,
                                  int            bootversion,
-                                 gboolean have_boot_partition,
+                                 const char    *boot_path_on_disk,
                                  GCancellable  *cancellable,
                                  GError       **error)
 {
   g_return_val_if_fail (OSTREE_IS_BOOTLOADER (self), FALSE);
 
   return OSTREE_BOOTLOADER_GET_IFACE (self)->write_config (self, bootversion, 
-                                                           have_boot_partition,
+                                                           boot_path_on_disk,
                                                            cancellable, error);
 }
 

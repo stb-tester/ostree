@@ -24,17 +24,27 @@ set -euo pipefail
 # Exports OSTREE_SYSROOT so --sysroot not needed.
 setup_os_repository "archive-z2" "syslinux"
 
-echo "1..2"
+echo "1..3"
 
 ${CMD_PREFIX} ostree --repo=sysroot/ostree/repo pull-local --remote=testos testos-repo testos/buildmaster/x86_64-runtime
+
 # Override the default and say that /boot is not a partition
-env OSTREE_SYSROOT_DEBUG=${OSTREE_SYSROOT_DEBUG},boot-is-not-mount \
+env OSTREE_DEBUG_MOUNTINFO_FILE=${test_srcdir}/boot_on_root_no_bind.mountinfo \
   ${CMD_PREFIX} ostree admin deploy --karg=root=LABEL=MOO --karg=quiet --os=testos testos:testos/buildmaster/x86_64-runtime
 
 assert_file_has_content sysroot/boot/syslinux/syslinux.cfg "KERNEL /boot/ostree/testos.*vmlinuz"
 assert_file_has_content sysroot/boot/syslinux/syslinux.cfg "INITRD /boot/ostree/testos.*initramfs"
 
-echo "ok bootonslash"
+echo "ok bootonslash - /boot not bind-mounted"
+
+# Same again, but with /boot bind-mounted from real /
+env OSTREE_DEBUG_MOUNTINFO_FILE=${test_srcdir}/boot_on_root_bind_mount.mountinfo \
+  ${CMD_PREFIX} ostree admin deploy --karg=root=LABEL=MOO --karg=quiet --os=testos testos:testos/buildmaster/x86_64-runtime
+
+assert_file_has_content sysroot/boot/syslinux/syslinux.cfg "KERNEL /boot/ostree/testos.*vmlinuz"
+assert_file_has_content sysroot/boot/syslinux/syslinux.cfg "INITRD /boot/ostree/testos.*initramfs"
+
+echo "ok bootonslash - /boot bind-mounted"
 
 ${CMD_PREFIX} ostree admin undeploy 0
 
