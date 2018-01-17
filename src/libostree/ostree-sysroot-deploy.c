@@ -2098,6 +2098,53 @@ ostree_sysroot_write_deployments (OstreeSysroot     *self,
                                                         cancellable, error);
 }
 
+#ifdef HAVE_LIBMOUNT
+typedef struct libmnt_table libmnt_table;
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (libmnt_table, mnt_free_table);
+typedef struct libmnt_fs libmnt_fs;
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (libmnt_fs, mnt_unref_fs);
+#endif /* HAVE_LIBMOUNT */
+
+/* Finds the path to /boot on the filesystem that /boot is actually stored on.
+ * If you have a dedicated boot partition this will probably be "".  If it's
+ * stored on the root partition it will be "/boot".
+ *
+ * The path_out won't end with a "/".  That means that "/" is represented at ""
+ */
+static gboolean
+boot_find_path_on_disk(char** path_out, GError **error)
+{
+#ifdef HAVE_LIBMOUNT
+  g_autoptr(libmnt_table) tb = mnt_new_table();
+  g_assert (tb);
+  if (mnt_table_parse_mtab(tb, getenv("OSTREE_DEBUG_MOUNTINFO_FILE")) < 0)
+    return glnx_throw (error, "Failed to parse /proc/self/mountinfo");
+
+  const char *suffix = NULL;
+  struct libmnt_fs *fs = mnt_table_find_target(tb, "/boot", MNT_ITER_BACKWARD);
+  if (fs)
+    suffix = "";
+  else
+    {
+      suffix = "boot";
+      fs = mnt_table_find_target(tb, "/", MNT_ITER_BACKWARD);
+      if (!fs)
+        return glnx_throw (error, "libmount error: Can't find /");
+    }
+  g_autofree char *path = g_build_path ("/", mnt_fs_get_root (fs), suffix, NULL);
+  if (strcmp(path, "/") == 0)
+    {
+      g_free (g_steal_pointer(&path));
+      path = g_strdup("");
+    }
+
+  *path_out = g_steal_pointer(&path);
+  return TRUE;
+#else /* !HAVE_LIBMOUNT */
+  return g_strdup("");
+#endif /* HAVE_LIBMOUNT */
+}
+
 /**
  * ostree_sysroot_write_deployments_with_options:
  * @self: Sysroot
@@ -2295,7 +2342,11 @@ ostree_sysroot_write_deployments_with_options (OstreeSysroot     *self,
 
       if (bootloader)
         {
+          g_autofree char *boot_path_on_disk = NULL;
+          if (!boot_find_path_on_disk (&boot_path_on_disk, error))
+            goto out;
           if (!_ostree_bootloader_write_config (bootloader, new_bootversion,
+                                                boot_path_on_disk,
                                                 cancellable, error))
             {
               g_prefix_error (error, "Bootloader write config: ");
