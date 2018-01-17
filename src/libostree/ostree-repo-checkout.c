@@ -1154,7 +1154,7 @@ checkout_tree_at_recurse (OstreeRepo                        *self,
       {
         /* Validate this up front to prevent path traversal attacks. */
         if (!ot_util_filename_validate (diff->name, error))
-          return FALSE;
+          return glnx_prefix_error (error, "File %s:", diff->name);
 
         if (!diff->after_checksum)
           if (!glnx_unlinkat(destination_dfd, diff->name, 0, error))
@@ -1169,7 +1169,7 @@ checkout_tree_at_recurse (OstreeRepo                        *self,
       {
         /* Validate this up front to prevent path traversal attacks. */
         if (!ot_util_filename_validate (diff->name, error))
-          return FALSE;
+          return glnx_prefix_error (error, "Directory %s:", diff->name);
 
         if (!diff->after)
           if (!glnx_shutil_rm_rf_at (destination_dfd, diff->name, cancellable, error))
@@ -1337,7 +1337,7 @@ checkout_tree_at (OstreeRepo                        *self,
       /* Validate this up front to prevent path traversal attacks. */
       const char *name = g_file_info_get_name (source_info);
       if (!ot_util_filename_validate (name, error))
-        return FALSE;
+        return glnx_prefix_error (error, "Single File %s:", name);
       return checkout_one_file_at (self, options, &state,
                                    ostree_repo_file_get_checksum (source),
                                    destination_dfd,
