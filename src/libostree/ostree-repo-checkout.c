@@ -37,6 +37,7 @@
 /* Per-checkout call state/caching */
 typedef struct {
   GString *selabel_path_buf;
+  gboolean enable_detailed_logging;
 } CheckoutState;
 
 static void
@@ -1016,6 +1017,10 @@ file_diff_iter_next(FileDiffIter* self)
   return &self->item;
 }
 
+const char spaces[] =
+    "                                                                      ";
+
+
 /*
  * checkout_tree_at_recurse:
  * @self: Repo
@@ -1042,6 +1047,7 @@ checkout_tree_at_recurse (OstreeRepo                        *self,
                           const char                        *dirtree_checksum,
                           const char                        *dirmeta_checksum,
                           const char                        *orig_dirtree_checksum,
+                          int                                level,
                           GCancellable                      *cancellable,
                           GError                           **error)
 {
@@ -1144,6 +1150,7 @@ checkout_tree_at_recurse (OstreeRepo                        *self,
     }
 
   GString *selabel_path_buf = state->selabel_path_buf;
+  const char* indent = spaces + MAX(0, 67 - level * 4);
 
   /* Delete files and directories that will be changing type - we can't
      atomically replace their contents */
@@ -1157,8 +1164,12 @@ checkout_tree_at_recurse (OstreeRepo                        *self,
           return FALSE;
 
         if (!diff->after_checksum)
-          if (!glnx_unlinkat(destination_dfd, diff->name, 0, error))
-            return FALSE;
+          {
+            if (state->enable_detailed_logging)
+              g_printerr ("D %s%s\n", indent, diff->name);
+            if (!glnx_unlinkat(destination_dfd, diff->name, 0, error))
+              return FALSE;
+          }
       }
   }
 
@@ -1172,8 +1183,12 @@ checkout_tree_at_recurse (OstreeRepo                        *self,
           return FALSE;
 
         if (!diff->after)
-          if (!glnx_shutil_rm_rf_at (destination_dfd, diff->name, cancellable, error))
-            return FALSE;
+          {
+            if (state->enable_detailed_logging)
+              g_printerr ("D %s%s/\n", indent, diff->name);
+            if (!glnx_shutil_rm_rf_at (destination_dfd, diff->name, cancellable, error))
+              return FALSE;
+          }
       }
   }
 
@@ -1189,6 +1204,13 @@ checkout_tree_at_recurse (OstreeRepo                        *self,
           continue;
         else if (diff->after_checksum)
           {
+            if (state->enable_detailed_logging)
+              {
+                if (diff->before_checksum)
+                  g_printerr ("M %s%s\n", indent, diff->name);
+                else
+                  g_printerr ("A %s%s\n", indent, diff->name);
+              }
             const size_t origlen = selabel_path_buf ? selabel_path_buf->len : 0;
             if (selabel_path_buf)
               g_string_append (selabel_path_buf, diff->name);
@@ -1220,6 +1242,14 @@ checkout_tree_at_recurse (OstreeRepo                        *self,
           }
         else if (diff->after)
           {
+            if (state->enable_detailed_logging)
+              {
+                if (diff->before)
+                  g_printerr ("M %s%s/\n", indent, diff->name);
+                else
+                  g_printerr ("A %s%s/\n", indent, diff->name);
+              }
+
             const size_t origlen = selabel_path_buf ? selabel_path_buf->len : 0;
             if (selabel_path_buf)
               {
@@ -1232,6 +1262,7 @@ checkout_tree_at_recurse (OstreeRepo                        *self,
                                            diff->after->dirtree_checksum,
                                            diff->after->dirmeta_checksum,
                                            diff->before ? diff->before->dirtree_checksum : NULL,
+                                           level + 1,
                                            cancellable, error))
               return FALSE;
 
@@ -1313,6 +1344,9 @@ checkout_tree_at (OstreeRepo                        *self,
       g_assert (options->force_copy);
     }
 
+  if (g_strcmp0(getenv("OSTREE_DEBUG_CHECKOUT_DETAILS"), "1") == 0)
+    state.enable_detailed_logging = TRUE;
+
   /* Special case handling for subpath of a non-directory */
   if (g_file_info_get_file_type (source_info) != G_FILE_TYPE_DIRECTORY)
     {
@@ -1370,6 +1404,7 @@ checkout_tree_at (OstreeRepo                        *self,
                                    destination_name,
                                    dirtree_checksum, dirmeta_checksum,
                                    overwrite_update_dirtree_checksum,
+                                   0,
                                    cancellable, error);
 }
 
