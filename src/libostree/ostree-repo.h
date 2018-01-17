@@ -921,12 +921,14 @@ typedef enum {
  * @OSTREE_REPO_CHECKOUT_OVERWRITE_UNION_FILES: When layering checkouts, unlink() and replace existing files, but do not modify existing directories (unless whiteouts are enabled, then directories are replaced)
  * @OSTREE_REPO_CHECKOUT_OVERWRITE_ADD_FILES: Only add new files/directories
  * @OSTREE_REPO_CHECKOUT_OVERWRITE_UNION_IDENTICAL: Like UNION_FILES, but error if files are not identical (requires hardlink checkouts)
+ * @OSTREE_REPO_CHECKOUT_OVERWRITE_UPDATE: Update an existing checkout.  Set OstreeRepoCheckoutAtOptions::overwrite_update_from_checksum.
  */
 typedef enum {
   OSTREE_REPO_CHECKOUT_OVERWRITE_NONE = 0,
   OSTREE_REPO_CHECKOUT_OVERWRITE_UNION_FILES = 1,
   OSTREE_REPO_CHECKOUT_OVERWRITE_ADD_FILES = 2, /* Since: 2017.3 */
   OSTREE_REPO_CHECKOUT_OVERWRITE_UNION_IDENTICAL = 3, /* Since: 2017.11 */
+  OSTREE_REPO_CHECKOUT_OVERWRITE_UPDATE = 4, /* Since: 2018.1 */
 } OstreeRepoCheckoutOverwriteMode;
 
 _OSTREE_PUBLIC
@@ -967,7 +969,8 @@ typedef struct {
   OstreeRepoDevInoCache *devino_to_csum_cache;
 
   int unused_ints[6];
-  gpointer unused_ptrs[5];
+  gpointer unused_ptrs[4];
+  const char *overwrite_update_from_checksum; /* Since: 2018.1 */
   OstreeSePolicy *sepolicy; /* Since: 2017.6 */
   const char *sepolicy_prefix;
 } OstreeRepoCheckoutAtOptions;
