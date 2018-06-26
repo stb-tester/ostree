@@ -632,6 +632,14 @@ ostree_builtin_commit (int argc, char **argv, OstreeCommandInvocation *invocatio
                                                    cancellable, error))
                 goto out;
             }
+          else if (strcmp (tree_type, "overlayfs") == 0)
+            {
+              modifier->flags |= OSTREE_REPO_COMMIT_MODIFIER_FLAGS_OVERLAYFS;
+              if (!ostree_repo_write_dfd_to_mtree (repo, AT_FDCWD, tree, mtree, modifier,
+                                                   cancellable, error))
+                goto out;
+              modifier->flags &= ^OSTREE_REPO_COMMIT_MODIFIER_FLAGS_OVERLAYFS;
+            }
           else if (strcmp (tree_type, "tar") == 0)
             {
               if (!opt_tar_pathname_filter)

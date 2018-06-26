@@ -3007,8 +3007,27 @@ _ostree_repo_commit_modifier_apply (OstreeRepo               *self,
   OstreeRepoCommitFilterResult result = OSTREE_REPO_COMMIT_FILTER_ALLOW;
   GFileInfo *modified_info;
 
-  if (modifier == NULL ||
-      (modifier->filter == NULL &&
+  if (modifier == NULL)
+    {
+      *out_modified_info = g_object_ref (file_info);
+      return OSTREE_REPO_COMMIT_FILTER_ALLOW;
+    }
+
+  if (modifier->flags & OSTREE_REPO_COMMIT_MODIFIER_FLAGS_OVERLAYFS)
+    {
+      if (g_file_info_has_attribute (file_info) == "unix::rdev") &&
+          g_file_info_get_attribute_uint32 ("unix::rdev") == 0)
+        {
+          /* overlayfs whiteouts are char devices with MAJOR:MINOR == 0:0 */
+          return OSTREE_REPO_COMMIT_FILTER_WHITEOUT;
+        }
+      else if (g_file_info_get_file_type (file_info) == G_FILE_TYPE_DIRECTORY)
+        {
+          if 
+        }
+    }
+
+  if (modifier->filter == NULL &&
        (modifier->flags & OSTREE_REPO_COMMIT_MODIFIER_FLAGS_CANONICAL_PERMISSIONS) == 0))
     {
       *out_modified_info = g_object_ref (file_info);

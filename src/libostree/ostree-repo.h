@@ -613,10 +613,14 @@ gboolean      ostree_repo_fsck_object (OstreeRepo           *self,
  * OstreeRepoCommitFilterResult:
  * @OSTREE_REPO_COMMIT_FILTER_ALLOW: Do commit this object
  * @OSTREE_REPO_COMMIT_FILTER_SKIP: Ignore this object
+ * @OSTREE_REPO_COMMIT_FILTER_WHITEOUT: Delete the object from the previous layer
+ * @OSTREE_REPO_COMMIT_FILTER_OPAQUE: Instead of merging contents of direcotyr
  */
 typedef enum {
   OSTREE_REPO_COMMIT_FILTER_ALLOW,
-  OSTREE_REPO_COMMIT_FILTER_SKIP
+  OSTREE_REPO_COMMIT_FILTER_SKIP,
+  OSTREE_REPO_COMMIT_FILTER_WHITEOUT,
+  OSTREE_REPO_COMMIT_FILTER_OPAQUE
 } OstreeRepoCommitFilterResult;
 
 /**
@@ -642,6 +646,7 @@ typedef OstreeRepoCommitFilterResult (*OstreeRepoCommitFilter) (OstreeRepo    *r
  * @OSTREE_REPO_COMMIT_MODIFIER_FLAGS_ERROR_ON_UNLABELED: Emit an error if configured SELinux policy does not provide a label
  * @OSTREE_REPO_COMMIT_MODIFIER_FLAGS_CONSUME: Delete added files/directories after commit; Since: 2017.13
  * @OSTREE_REPO_COMMIT_MODIFIER_FLAGS_DEVINO_CANONICAL: If a devino cache hit is found, skip modifier filters (non-directories only); Since: 2017.14
+ * @OSTREE_REPO_COMMIT_MODIFIER_FLAGS_OVERLAYFS: Interpret overlayfs whiteouts and opaque directory xattrs; Since: 2018.7
  */
 typedef enum {
   OSTREE_REPO_COMMIT_MODIFIER_FLAGS_NONE = 0,
@@ -651,6 +656,7 @@ typedef enum {
   OSTREE_REPO_COMMIT_MODIFIER_FLAGS_ERROR_ON_UNLABELED = (1 << 3),
   OSTREE_REPO_COMMIT_MODIFIER_FLAGS_CONSUME = (1 << 4),
   OSTREE_REPO_COMMIT_MODIFIER_FLAGS_DEVINO_CANONICAL = (1 << 5),
+  OSTREE_REPO_COMMIT_MODIFIER_FLAGS_OVERLAYFS = (1 << 6),
 } OstreeRepoCommitModifierFlags;
 
 /**
