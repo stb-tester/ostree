@@ -4412,6 +4412,7 @@ static gboolean resolve_sha_to_tree (OstreeRepo       *self,
  *    :REF
  *    REF
  *    COMMIT_SHA
+ *    TREE_SHA (but only if "path" parameter is also provided)
  *
  * Not currently supported (but could be implemented):
  *
@@ -4539,8 +4540,40 @@ resolve_sha_to_tree (OstreeRepo       *self,
       return TRUE;
     }
 
+  if (!ostree_repo_has_object (self, OSTREE_OBJECT_TYPE_DIR_TREE, sha,
+                               &has_object, cancellable, error))
+    return FALSE;
+  if (has_object)
+    {
+      /* We're a bit cheeky here - we need to specify a metadata checksum but we
+       * don't have one.  We're getting a subpath here anyway we're not going to
+       * return this invalid file. */
+      g_autoptr(OstreeRepoFile) root =  _ostree_repo_file_new_root (
+          self, sha, "00000000000000000000000000000000");
+      if (!root)
+        return FALSE;
+      ot_transfer_out_value (out, &root);
+      if (out_commit_sha)
+        *out_commit_sha = NULL;
+      return TRUE;
+    }
+
+  if (!ostree_repo_has_object (self, OSTREE_OBJECT_TYPE_DIR_TREE, sha,
+                               &has_object, cancellable, error))
+    return FALSE;
+  if (has_object)
+    {
+      /* For now we can't construct a OstreeRepoFile that has no parent
+       * directory nor a name.  In the future we could OstreeRepoFile a bit to
+       * enable that but it's left unimplemented for now. */
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+                   "TODO: treeishes which are blobs not yet implemented: %s",
+                   sha);
+      return FALSE;
+    }
+
   g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
-               "No COMMIT found for sha %s", sha);
+               "No DIR_TREE or COMMIT found for sha %s", sha);
   return FALSE;
 }
 
