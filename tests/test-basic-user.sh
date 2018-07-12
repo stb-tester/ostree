@@ -27,7 +27,7 @@ skip_without_user_xattrs
 
 setup_test_repository "bare-user"
 
-extra_basic_tests=6
+extra_basic_tests=7
 . $(dirname $0)/basic-test.sh
 
 # Reset things so we don't inherit a lot of state from earlier tests
@@ -123,3 +123,46 @@ assert_file_has_content ls.txt "^-006.. ${myuid} ${mygid} .*/baz/cow"
 
 $OSTREE refs --delete test2-{linkcheckout,devino}-test
 echo "ok commit with -I"
+
+mkdir -p xattrroot/bin xattrroot/home/ostree
+touch xattrroot/bin/sudo xattrroot/bin/bash
+
+cat >setx.py <<'EOF'
+#/usr/bin/python
+import os
+import struct
+import sys
+
+import xattr
+
+
+def setx(filename, uid, gid, mode):
+    type_bits = os.stat(filename).st_mode & 0o170000
+    return xattr.setxattr(filename, "user.ostreemeta",
+                          struct.pack('>III', uid, gid, mode | type_bits))
+
+setx("xattrroot", 0, 0, 0o0755)
+setx("xattrroot/bin", 0, 0, 0o0755)
+setx("xattrroot/bin/bash", 0, 0, 0o0755)
+setx("xattrroot/bin/sudo", 0, 0, 0o4755)
+setx("xattrroot/home", 0, 0, 0o0755)
+setx("xattrroot/home/ostree", 1001, 80, 0o0700)
+EOF
+python setx.py
+
+$OSTREE commit -b xattrtest --tree=dir=xattrroot \
+               --link-checkout-speedup --consume \
+               --use-bare-user-xattrs
+$OSTREE ls -R xattrtest >out
+cat >expected <<EOF
+d00755 0 0      0 /
+d00755 0 0      0 /bin
+-00755 0 0      0 /bin/bash
+-04755 0 0      0 /bin/sudo
+d00755 0 0      0 /home
+d00700 1001 80      0 /home/ostree
+EOF
+
+diff -u expected out || fatal "Tree contents incorrect"
+
+echo "ok commit with --use-bare-user-xattrs"
