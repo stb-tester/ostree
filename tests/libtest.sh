@@ -37,6 +37,7 @@ fi
 save_core() {
   if [ -e core ]; then
     cp core "$test_srcdir/core"
+    gdb -batch -ex bt "$test_builddir/../.libs/ostree" core
   fi
 }
 
