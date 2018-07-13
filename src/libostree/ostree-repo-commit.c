@@ -3026,22 +3026,29 @@ load_bare_user_xattrs (int                       dfd,
    * but currently glib doesn't know anything about ENODATA: */
   GIOErrorEnum enodata_gerror_code = g_io_error_from_errno (ENODATA);
 
+  struct stat current_stat;
+  _ostree_gfileinfo_to_stbuf (file_info, &current_stat);
+
+  struct stat new_stat;
+  g_autoptr(GVariant) ret_xattrs = NULL;
+
   g_autoptr (GError) tmp_error = NULL;
   g_autoptr(GBytes) bytes = glnx_lgetxattrat (dfd, name, "user.ostreemeta",
                                               &tmp_error);
   if (bytes == NULL)
     {
-      if (g_error_matches (tmp_error, G_IO_ERROR, enodata_gerror_code))
-        goto out_nometa;
-      g_propagate_error (error, g_steal_pointer (&tmp_error));
-      return FALSE;
+      if (!g_error_matches (tmp_error, G_IO_ERROR, enodata_gerror_code))
+        {
+          g_propagate_error (error, g_steal_pointer (&tmp_error));
+          return FALSE;
+        }
+      new_stat = current_stat;
+      new_stat.st_uid = 0;
+      new_stat.st_gid = 0;
     }
+  else
+    ret_xattrs = _ostree_filemeta_to_stat (&new_stat, bytes);
 
-  struct stat current_stat;
-  _ostree_gfileinfo_to_stbuf (file_info, &current_stat);
-
-  struct stat new_stat;
-  g_autoptr(GVariant) ret_xattrs = _ostree_filemeta_to_stat (&new_stat, bytes);
   new_stat.st_mode = (current_stat.st_mode & S_IFMT) | (new_stat.st_mode & 07777);
 
   if (new_stat.st_uid != current_stat.st_uid ||
@@ -3060,10 +3067,6 @@ load_bare_user_xattrs (int                       dfd,
     g_set_object (out_modified_info, file_info);
 
   *out_xattrs = g_steal_pointer (&ret_xattrs);
-  return TRUE;
-out_nometa:
-  g_set_object (out_modified_info, file_info);
-  *out_xattrs = NULL;
   return TRUE;
 }
 
