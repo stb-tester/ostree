@@ -44,11 +44,26 @@
 #include "ostree-repo-private.h"
 #include "ostree-sysroot-private.h"
 #include "ostree-sepolicy-private.h"
-#include "ostree-bootloader-zipl.h"
 #include "ostree-deployment-private.h"
 #include "ostree-core-private.h"
 #include "ostree-linuxfsutil.h"
 #include "libglnx.h"
+
+#ifdef HAVE_LIBMOUNT
+typedef struct libmnt_table libmnt_table;
+typedef struct libmnt_fs libmnt_fs;
+typedef struct libmnt_cache libmnt_cache;
+
+#ifdef HAVE_MNT_UNREF_CACHE
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (libmnt_table, mnt_unref_table);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (libmnt_fs, mnt_unref_fs);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (libmnt_cache, mnt_unref_cache);
+#else
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (libmnt_table, mnt_free_table);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (libmnt_fs, mnt_free_fs);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (libmnt_cache, mnt_free_cache);
+#endif
+#endif /* HAVE_LIBMOUNT */
 
 #ifdef HAVE_LIBSYSTEMD
 #define OSTREE_VARRELABEL_ID            SD_ID128_MAKE(da,67,9b,08,ac,d3,45,04,b7,89,d9,6f,81,8e,a7,81)
@@ -2185,28 +2200,17 @@ is_ro_mount (const char *path)
    * Systemd has a totally different implementation in
    * src/basic/mount-util.c.
    */
-  struct libmnt_table *tb = mnt_new_table_from_file ("/proc/self/mountinfo");
-  struct libmnt_fs *fs;
-  struct libmnt_cache *cache;
-  gboolean is_mount = FALSE;
-  struct statvfs stvfsbuf;
+  g_autoptr(libmnt_table) tb = mnt_new_table_from_file ("/proc/self/mountinfo");
 
   if (!tb)
     return FALSE;
 
-  /* to canonicalize all necessary paths */
-  cache = mnt_new_cache ();
+    /* to canonicalize all necessary paths */
+  g_autoptr(libmnt_cache) cache = mnt_new_cache ();
   mnt_table_set_cache (tb, cache);
 
-  fs = mnt_table_find_target(tb, path, MNT_ITER_BACKWARD);
-  is_mount = fs && mnt_fs_get_target (fs);
-#ifdef HAVE_MNT_UNREF_CACHE
-  mnt_unref_table (tb);
-  mnt_unref_cache (cache);
-#else
-  mnt_free_table (tb);
-  mnt_free_cache (cache);
-#endif
+  g_autoptr(libmnt_fs) fs = mnt_table_find_target(tb, path, MNT_ITER_BACKWARD);
+  gboolean is_mount = fs && mnt_fs_get_target (fs);
 
   if (!is_mount)
     return FALSE;
@@ -2214,6 +2218,7 @@ is_ro_mount (const char *path)
   /* We *could* parse the options, but it seems more reliable to
    * introspect the actual mount at runtime.
    */
+  struct statvfs stvfsbuf;
   if (statvfs (path, &stvfsbuf) == 0)
     return (stvfsbuf.f_flag & ST_RDONLY) != 0;
 
@@ -2503,7 +2508,6 @@ ostree_sysroot_write_deployments_with_options (OstreeSysroot     *self,
   gboolean bootloader_is_atomic = FALSE;
   SyncStats syncstats = { 0, };
   g_autoptr(OstreeBootloader) bootloader = NULL;
-  const char *bootloader_config = NULL;
   if (!requires_new_bootversion)
     {
       if (!create_new_bootlinks (self, self->bootversion,
@@ -2535,29 +2539,8 @@ ostree_sysroot_write_deployments_with_options (OstreeSysroot     *self,
             return glnx_throw_errno_prefix (error, "Remounting /boot read-write");
         }
 
-      OstreeRepo *repo = ostree_sysroot_repo (self);
-
-      bootloader_config = ostree_repo_get_bootloader (repo);
-
-      g_debug ("Using bootloader configuration: %s", bootloader_config);
-
-      if (g_str_equal (bootloader_config, "auto"))
-        {
-          if (!_ostree_sysroot_query_bootloader (self, &bootloader, cancellable, error))
-            return FALSE;
-        }
-      else if (g_str_equal (bootloader_config, "none"))
-        {
-          /* No bootloader specified; do not query bootloaders to run. */
-        }
-      else if (g_str_equal (bootloader_config, "zipl"))
-        {
-          /* Because we do not mark zipl as active by default, lets creating one here,
-           * which is basically the same what _ostree_sysroot_query_bootloader() does
-           * for other bootloaders if being activated.
-           * */
-          bootloader = (OstreeBootloader*) _ostree_bootloader_zipl_new (self);
-        }
+      if (!_ostree_sysroot_query_bootloader (self, &bootloader, cancellable, error))
+        return FALSE;
 
       bootloader_is_atomic = bootloader != NULL && _ostree_bootloader_is_atomic (bootloader);
 
@@ -2588,6 +2571,7 @@ ostree_sysroot_write_deployments_with_options (OstreeSysroot     *self,
                        (bootloader_is_atomic ? "Transaction complete" : "Bootloader updated"),
                        requires_new_bootversion ? "yes" : "no",
                        new_deployments->len - self->deployments->len);
+    const gchar *bootloader_config = ostree_repo_get_bootloader (ostree_sysroot_repo (self));
     ot_journal_send ("MESSAGE_ID=" SD_ID128_FORMAT_STR, SD_ID128_FORMAT_VAL(OSTREE_DEPLOYMENT_COMPLETE_ID),
                      "MESSAGE=%s", msg,
                      "OSTREE_BOOTLOADER=%s", bootloader ? _ostree_bootloader_get_name (bootloader) : "none",

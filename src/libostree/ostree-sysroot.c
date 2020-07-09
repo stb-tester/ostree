@@ -36,6 +36,7 @@
 #include "ostree-bootloader-uboot.h"
 #include "ostree-bootloader-syslinux.h"
 #include "ostree-bootloader-grub2.h"
+#include "ostree-bootloader-zipl.h"
 
 /**
  * SECTION:ostree-sysroot
@@ -1301,6 +1302,7 @@ ostree_sysroot_repo (OstreeSysroot *self)
  * ostree_sysroot_query_bootloader:
  * @sysroot: Sysroot
  * @out_bootloader: (out) (transfer full) (allow-none): Return location for bootloader, may be %NULL
+ * @out_bootloader_config: (out) (transfer none) (allow-none): Return location for value of ostree repo config variable sysroot.bootloader, may be %NULL
  * @cancellable: Cancellable
  * @error: Error
  */
@@ -1310,30 +1312,63 @@ _ostree_sysroot_query_bootloader (OstreeSysroot     *sysroot,
                                   GCancellable      *cancellable,
                                   GError           **error)
 {
-  gboolean is_active;
-  g_autoptr(OstreeBootloader) ret_loader =
-    (OstreeBootloader*)_ostree_bootloader_syslinux_new (sysroot);
-  if (!_ostree_bootloader_query (ret_loader, &is_active,
-                                 cancellable, error))
-    return FALSE;
+  OstreeRepo *repo = ostree_sysroot_repo (sysroot);
+  OstreeCfgSysrootBootloaderOpt bootloader_config = repo->bootloader;
 
-  if (!is_active)
+  g_debug ("Using bootloader configuration: %s",
+      CFG_SYSROOT_BOOTLOADER_OPTS_STR[bootloader_config]);
+
+  g_autoptr(OstreeBootloader) ret_loader = NULL;
+  switch (repo->bootloader)
     {
-      g_object_unref (ret_loader);
-      ret_loader = (OstreeBootloader*)_ostree_bootloader_grub2_new (sysroot);
-      if (!_ostree_bootloader_query (ret_loader, &is_active,
-                                     cancellable, error))
-        return FALSE;
+    case CFG_SYSROOT_BOOTLOADER_OPT_NONE:
+      /* No bootloader specified; do not query bootloaders to run. */
+      ret_loader = NULL;
+      break;
+    case CFG_SYSROOT_BOOTLOADER_OPT_GRUB2:
+      ret_loader = (OstreeBootloader*) _ostree_bootloader_grub2_new (sysroot);
+      break;
+    case CFG_SYSROOT_BOOTLOADER_OPT_SYSLINUX:
+      ret_loader = (OstreeBootloader*) _ostree_bootloader_syslinux_new (sysroot);
+      break;
+    case CFG_SYSROOT_BOOTLOADER_OPT_UBOOT:
+      ret_loader = (OstreeBootloader*) _ostree_bootloader_uboot_new (sysroot);
+      break;
+    case CFG_SYSROOT_BOOTLOADER_OPT_ZIPL:
+      /* We never consider zipl as active by default, so it can only be created
+       * if it's explicitly requested in the config */
+      ret_loader = (OstreeBootloader*) _ostree_bootloader_zipl_new (sysroot);
+      break;
+    case CFG_SYSROOT_BOOTLOADER_OPT_AUTO:
+      {
+        gboolean is_active;
+        ret_loader = (OstreeBootloader*)_ostree_bootloader_syslinux_new (sysroot);
+        if (!_ostree_bootloader_query (ret_loader, &is_active,
+                                      cancellable, error))
+          return FALSE;
+
+        if (!is_active)
+          {
+            g_object_unref (ret_loader);
+            ret_loader = (OstreeBootloader*)_ostree_bootloader_grub2_new (sysroot);
+            if (!_ostree_bootloader_query (ret_loader, &is_active,
+                                          cancellable, error))
+              return FALSE;
+          }
+        if (!is_active)
+          {
+            g_object_unref (ret_loader);
+            ret_loader = (OstreeBootloader*)_ostree_bootloader_uboot_new (sysroot);
+            if (!_ostree_bootloader_query (ret_loader, &is_active, cancellable, error))
+              return FALSE;
+          }
+        if (!is_active)
+          g_clear_object (&ret_loader);
+        break;
+      }
+    default:
+      g_assert_not_reached ();
     }
-  if (!is_active)
-    {
-      g_object_unref (ret_loader);
-      ret_loader = (OstreeBootloader*)_ostree_bootloader_uboot_new (sysroot);
-      if (!_ostree_bootloader_query (ret_loader, &is_active, cancellable, error))
-        return FALSE;
-    }
-  if (!is_active)
-    g_clear_object (&ret_loader);
 
   ot_transfer_out_value(out_bootloader, &ret_loader);
   return TRUE;
@@ -2104,4 +2139,41 @@ ostree_sysroot_deployment_set_pinned (OstreeSysroot     *self,
     return FALSE;
 
   return TRUE;
+}
+
+/**
+ * _ostree_sysroot_get_boot_path_on_disk
+ *
+ * We need to provide absolute paths to the bootloader for the location of the
+ * kernel to boot into, but this needs to be relative to root on the filesystem
+ * that the kernel is on, rather than relative to root of the root filesystem.
+ * If boot is on a seperate filesystem to root this will typically return "/",
+ * otherwise it will typically be "/boot".
+ */
+char *
+_ostree_sysroot_get_boot_path_on_disk (OstreeSysroot *sysroot, GError **error)
+{
+  GKeyFile * config = ostree_repo_get_config (sysroot->repo);
+
+  g_autofree char * boot_path_on_disk = NULL;
+  if (!ot_keyfile_get_value_with_default_group_optional (config, "sysroot",
+                                                         "boot_path_on_disk", "auto",
+                                                         &boot_path_on_disk, error))
+    return NULL;
+
+  if (g_str_equal (boot_path_on_disk, "auto"))
+    {
+      /* TODO: Be smarter about working this out automatically */
+      g_free (boot_path_on_disk);
+      boot_path_on_disk = g_strdup ("/");
+    }
+
+  if (!boot_path_on_disk || boot_path_on_disk[0] != '/')
+    {
+      g_error_new (G_IO_ERROR, G_IO_ERROR_FAILED, "sysroot.boot_path_on_disk "
+          "must be an absolute path.  It is \"%s\"", boot_path_on_disk);
+      return NULL;
+    }
+
+  return g_steal_pointer (&boot_path_on_disk);
 }

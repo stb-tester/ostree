@@ -347,7 +347,9 @@ Boston, MA 02111-1307, USA.
         <term><varname>bootloader</varname></term>
         <listitem><para>Configure the bootloader that OSTree uses when
         deploying the sysroot.  This may take the values
-        <literal>bootloader=none</literal> or <literal>bootloader=auto</literal>.
+        <literal>bootloader=none</literal>, <literal>bootloader=auto</literal>,
+        <literal>bootloader=grub2</literal>, <literal>bootloader=syslinux</literal>,
+        <literal>bootloader=uboot</literal> or <literal>bootloader=zipl</literal>.
         Default is <literal>auto</literal>.
         </para>
         <para>
@@ -362,6 +364,38 @@ Boston, MA 02111-1307, USA.
           then OSTree will generate a config for the bootloader found.  For
           example, <literal>grub2-mkconfig</literal> is run for the grub2 case.
         </para>
+        <para>
+          A specific bootloader type may also be explicitly requested by choosing
+          <literal>grub2</literal>, <literal>syslinux</literal>, <literal>uboot</literal> or
+          <literal>zipl</literal>.
+        </para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>boot_path_on_disk</varname></term>
+        <listitem>
+          <para>
+            Tell ostree where the bootloader will be looking for the kernel.
+            This is the location of <literal>/boot</literal> relative to the
+            root of the boot partition.
+          </para>
+          <para>
+            This allows explicitly telling ostree that the boot partition is or
+            is not seperate from the root partition.  If
+            <literal>/boot</literal> is on root set this to
+            <literal>/boot</literal>.  If it's on seperate partition this
+            should be set to <literal>/</literal>.
+          </para>
+          <para>
+            This must be either an absolute path (starting with
+            <literal>/</literal>) or <literal>auto</literal>.  Defaults to
+            <literal>auto</literal>.
+          </para>
+          <para>
+            This setting currently only respected by the u-boot and syslinux
+            bootloaders.
+          </para>
         </listitem>
       </varlistentry>
 
