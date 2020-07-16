@@ -87,6 +87,8 @@ with open(syslinuxpath) as f:
             syslinux_entry['title'] = v
         elif k == 'KERNEL':
             syslinux_entry['linux'] = v
+        elif k == 'LINUX':
+            syslinux_entry['linux'] = v
         elif k == 'INITRD':
             syslinux_entry['initrd'] = v
         elif k == 'APPEND':
